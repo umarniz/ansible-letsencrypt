@@ -13,6 +13,9 @@
     when: virtualenv_package_name is not defined
     tags: install
 
+  - debug:
+      var: letsencrypt_command
+
   - name: install certbot (Debian jessie)
     include: debian-jessie.yml
     when: ansible_distribution == "Debian" and ansible_distribution_release == "jessie"
@@ -25,48 +28,28 @@
     include: notdebian.yml
     when: ansible_distribution != "Debian"
 
-  - name: Ensure webroot exists
+  - name: Ensure webroot directories exist
     file:
-      path: "{{ letsencrypt_webroot_path }}"
+      path: "{{ letsencrypt_webroot_path }}/{{ item.name }}"
       state: directory
       follow: yes
     become: yes
+    with_items: "{{ letsencrypt_cert_domains }}"
 
   - name: Attempt to get the certificate using the webroot authenticator
-    command: "{{ letsencrypt_command }} -a webroot --webroot-path {{ letsencrypt_webroot_path }} certonly"
+    command: "{{ letsencrypt_command }}  {% for domain in item.urls %}-d {{ domain }} {% endfor %}-a webroot --webroot-path {{ letsencrypt_webroot_path }}/{{ item.name }} certonly"
     become: yes
     args:
-      creates: "/etc/letsencrypt/live/{{ letsencrypt_cert_domains[0] }}"
-    when: letsencrypt_authenticator == "webroot"
+      creates: "/etc/letsencrypt/live/{{ item.name }}"
     ignore_errors: True
-
-  - name: Attempt to get the certificate using the standalone authenticator (in case eg the webserver isn't running yet)
-    command: "{{ letsencrypt_command }} -a standalone auth {{ letsencrypt_standalone_command_args }}"
-    become: yes
-    args:
-      creates: "/etc/letsencrypt/live/{{ letsencrypt_cert_domains[0] }}"
-
-  - name: Fix the renewal file
-    ini_file:
-      section: renewalparams
-      option: "{{ item.key }}"
-      value: "{{ item.value }}"
-      dest: "/etc/letsencrypt/renewal/{{ letsencrypt_cert_domains[0] }}.conf"
-    become: yes
-    with_dict:
-      os_packages_only: False
-      verb: certonly
-      noninteractive_mode: False
-      uir: False
-      hsts: False
-      authenticator: '{{ letsencrypt_authenticator }}'
+    with_items: "{{ letsencrypt_cert_domains }}"
 
   - name: Fix the webroot map in the renewal file
     ini_file:
       section: "[webroot_map]"
-      option: "{{ item }}"
-      value: "{{ letsencrypt_webroot_path }}"
-      dest: "/etc/letsencrypt/renewal/{{ letsencrypt_cert_domains[0] }}.conf"
+      option: "{{ item.name }}"
+      value: "{{ letsencrypt_webroot_path }}//{{ item.name }}"
+      dest: "/etc/letsencrypt/renewal/{{ item.name }}.conf"
     become: yes
     with_items: "{{ letsencrypt_cert_domains }}"
 
@@ -78,25 +61,3 @@
       hour: "{{ letsencrypt_renewal_frequency.hour }}"
       minute: "{{ letsencrypt_renewal_frequency.minute }}"
       job: "{{letsencrypt_path}} renew --quiet {{ letsencrypt_renewal_command_args }}"
-
-  - name: Create directory for `ssl_certificate` and `ssl_certificate_key`
-    file:
-      path: '{{ item }}'
-      state: directory
-      recurse: yes
-    when: ssl_certificate is defined and ssl_certificate_key is defined
-    with_items:
-      - "{{ ssl_certificate|dirname }}"
-      - "{{ ssl_certificate_key|dirname }}"
-
-  - name: Symlink certificates to `ssl_certificate` and `ssl_certificate_key`
-    file:
-      src: '{{ item.src }}'
-      dest: '{{ item.dest }}'
-      state: link
-    when: ssl_certificate is defined and ssl_certificate_key is defined
-    with_items:
-      - src: /etc/letsencrypt/live/{{ letsencrypt_cert_domains[0] }}/fullchain.pem
-        dest: "{{ssl_certificate}}"
-      - src: /etc/letsencrypt/live/{{ letsencrypt_cert_domains[0] }}/privkey.pem
-        dest: "{{ssl_certificate_key}}"
