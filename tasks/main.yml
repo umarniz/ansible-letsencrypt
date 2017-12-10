@@ -36,13 +36,41 @@
     become: yes
     with_items: "{{ letsencrypt_cert_domains }}"
 
-  - name: Attempt to get the certificate using the webroot authenticator
-    command: "{{ letsencrypt_command }}  {% for domain in item.urls %}-d {{ domain }} {% endfor %}-a webroot --webroot-path {{ letsencrypt_webroot_path }}/{{ item.name }} certonly"
+  - name: Remove existing certificates
+    file:
+      path: "/etc/letsencrypt/live/{{ item.name }}/"
+      state: absent
+    when: letsencrypt_clean is defined and letsencrypt_clean == True
+    with_items: "{{ letsencrypt_cert_domains }}"
+
+  - name: Remove existing archives
+    file:
+      path: "/etc/letsencrypt/archive/{{ item.name }}/"
+      state: absent
+    when: letsencrypt_clean is defined and letsencrypt_clean == True 
+    with_items: "{{ letsencrypt_cert_domains }}"
+
+  - name: Remove existing renewal configs
+    file:
+      path: "/etc/letsencrypt/renewal/{{ item.name }}.conf"
+      state: absent
+    when: letsencrypt_clean is defined and letsencrypt_clean == True
+    with_items: "{{ letsencrypt_cert_domains }}"
+
+  - name: stop nginx
+    service: name=nginx state=stopped
+    ignore_errors: True
+
+  - name: Attempt to get the certificate using the standalone authenticator
+    command: "{{ letsencrypt_command }}  {% for domain in item.urls %}-d {{ domain }} {% endfor %}-a standalone auth"
     become: yes
     args:
       creates: "/etc/letsencrypt/live/{{ item.name }}"
-    ignore_errors: True
     with_items: "{{ letsencrypt_cert_domains }}"
+
+  - name: start nginx     
+    service: name=nginx state=started
+    ignore_errors: True
 
   - name: Fix the webroot map in the renewal file
     ini_file:
